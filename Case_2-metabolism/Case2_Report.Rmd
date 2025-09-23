@@ -1,0 +1,548 @@
+---
+title: "Exploration of Data From a Metabolic Assay Panel"
+author: "Sonya Eason, Cindy Ju, Sophia Yang"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  bookdown::pdf_document2:
+    latex_engine: xelatex
+    toc: false
+    extra_dependencies: ["float"]
+  bookdown::html_document2:
+    toc: true
+    number_sections: true
+    fig_caption: true
+---
+
+# Background and Motivation
+
+Metabolic function is essential for life. Metabolic efficiency is the body's ability to convert energy into usable forms while minimizing waste. Researchers would like to determine the effect of a specific genotype change on metabolic efficiency. Mitochondria play a crucial role in metabolic activity and thus were used to examine changes in metabolism. As part of the metabolic process, oxygen is consumed to make usable energy. Hence, oxygen flux (JO2) was used as a proxy to measure metabolic activity.
+
+# Data and Exploratory Analysis
+
+## Data
+
+We were given observations from 12 mice (6 transgenic, 6 non-transgenic). Due to cost and time limitations, a pair or batch of non-transgenic and transgenic mice was observed each day. Mitochondria were extracted and placed into each of 6 different substrates under controlled conditions. Afterwards, researchers varied the amount of Gibbs free energy available which we will subsequently call “dose”. We cleaned the dataset so that each observation represents a unique mouse, substrate, and dosage. Notably, there were missing observations on the 6th day for both transgenic and non-transgenic mice in the substrates PCM and OCM for all dosages except for basal and -12.95. Due to this missingness, we opted to remove the 6th pair for these two substrates.
+
+According to their data notes, the basal state represents measurements made before introducing the mitochondria, having only the substrate present. As a result, we removed these values for our analysis. The dose -12.95 is when the creatine kinase energy clamp is engaged, representing the highest workload for the mitochondria. Perplexingly, this value is not included in the slope calculations from the researchers. In contrast, the dose -14.49 represents the lowest workload, described as a rested state where energy demand is low. While the doses are administered at discrete intervals for the purpose of this experiment, the amount of free energy available is continuous. Additionally, having dose be categorical lowers the amount of power as it is plausible that there are trends as dosage increases or decreases. Therefore, we decided to use dose as a continuous rather than discrete variable.
+
+## Exploratory Data Analysis
+
+In order to inform our modeling decisions, we visualized the effects and interactions between the variables. We first plotted a line graph of JO2 production by genotype and dose (Figure \@ref(fig:fig-1)). First, the plot revealed a visible effect of both dose and genotype, with JO2 production increasing as dose increases, and transgenic genotype mice producing more JO2 on average at each dose level. Regarding the interaction between genotype and dose, the slopes diverge as dose increases, indicating a relationship between the two variables, with the transgenic genotype being more sensitive to increases in dose than the non-transgenic genotype. Interestingly, it appears as if the transgenic results follow the same pattern as the non-transgenic results. Looking at the higher doses of -12.95 and -13.65, both genotypes have two sets of observations that diverge.
+
+We also made a box plot of JO2 production by genotype and substrate (Figure \@ref(fig:fig-2)). Across the various substrates, the substrates OCM and PCM had considerably less variation in JO2 production than the other substrates. Additionally, in line with our previous graph, transgenics had a higher median JO2 than non-transgenics, but distributions overlap a lot. Regarding a genotype and substrate interaction, the difference between transgenic and non-transgenic JO2 appears to depend on substrate. In GM, transgenics have higher median JO2 than non-transgenics. In PM and PMPC, transgenics clearly shift upward relative to non-transgenics, showing larger differences. Also notable is the potential non-linearity of the data.
+
+Next, to address Objective 3, we examined a three-way interaction with a faceted line graph (Figure \@ref(fig:fig-3)). The trend in the divergence of JO2 production is different across substrates. For PMPC, PMOC, PM, and GM, the transgenic genotype shows increasing JO2 approaching -12.95 dose compared to non-transgenic. In OCM and PCM, both genotypes increase similarly/parallel with dose, with transgenic being consistently higher, indicating it is more of an effect of genotype alone. On these graphs, there is a slight lag and plateau effect, particularly at the -12.95 dose. Without -12.95, the graphs appear mostly linear.
+
+Finally, Figure \@ref(fig:fig-4) shows the influence of batching with pair. This plot was created by fitting a linear mixed model with simple effects on genotype, dose, and substrate along with a random effect on pair. Subsequently, random intercepts for pair were extracted and their variances and 95% confidence intervals were computed. As seen in the resulting plot, pair 6 was a significant outlier. Pairs 3 and 4 also show significant deviation from the mean. There is evidence to support that batching does have an effect on our outcome JO2.
+
+# Modeling
+
+## Model Selection
+
+At the core, our model has to control for dose, substrate, and genotype. Based on Figure \@ref(fig:fig-4), we know that we have to include pair in our model in some way. We chose to use a linear mixed model with a random effect on pair since it's reasonable to assume that the mice chosen come from a broader population of both transgenic and non-transgenic mice.
+
+In addition to the simple and random effects, we added an interaction term for dose and substrate. Recall that each of the 6 substrates below assesses the performance of various metabolic pathways. The interaction terms allows for different slopes and is important because we assume that the effect a dose has on JO2 production will be dependent on the substrate the mitochondria are in.
+
+However, there was one more problem, the dose of -12.95 which represented the highest workload. As seen in our EDA with Figure \@ref(fig:fig-1) and Figure \@ref(fig:fig-3), this dosage seemed like an outlier. With it included, our residual plots also had a pattern that did not resemble a linear relationship. Based on the information we were provided, the researchers chose to exclude -12.95 from lines of best fit into their visualizations. Hence, for this model we followed suit under the assumption that the researchers had a logic-based reason for doing so.
+
+Thus, to answer the question of how genotype affects JO2 our model is:
+
+$$
+JO2_{ij} = \beta_0   + \beta_1 \cdot \text{Substrate}_{ij}   + \beta_2 \cdot \text{Dose}_{ij}   + \beta_3 \cdot (\text{Substrate}_{ij} \times \text{Dose}_{ij}) + u_i + \epsilon_{ij}
+$$
+
+$$
+u_i \sim N(0, \sigma_u^2), \quad \epsilon_{ij} \sim N(0, \sigma^2)
+$$
+
+where $u_i$ is the random effect on pair $i$ and $ij$ is observation $j$ of pair $i$.
+
+However, we also wanted a separate model to determine if the effect of genotype varies across substrates. To this extent, we fit a linear mixture model to the data that included an interaction that incorporated genotype-substrate interaction since this was necessary to answer the question of whether treatment affects transgenic mice differently.
+
+$$
+JO2_{ij} = \beta_0 + \beta_1 \cdot \text{Substrate}_{ij} + \beta_2 \cdot \text{Dose}_{ij} + \beta_3 \cdot (\text{Substrate}_{ij} \times \text{Dose}_{ij}) + \beta_4 \cdot (\text{Substrate}_{ij} \times \text{Genotype}_{ij}) + u_i + \epsilon_{ij}
+$$
+
+We attempted to also utilize a gamma mixture model after viewing the residuals against covariates of that model (Figure \@ref(fig:fig-7)), but did not select this as our final model.
+
+## Implementation
+
+Linear mixed models were fit in R using the `lmer` function. To reiterate, we used dose as numeric, dropping -12.5 and Basal. To interpret p-values for our genotype-substrate interaction model, we wrote a Holm–Šidák function based on slides from lecture on 9/16. Code for this function can be found in the appendix.
+
+## Evaluation
+
+To begin, we compared a version of our base model with and without the interaction term. We ran an ANOVA test (Table \@ref(tab:anova)) and found that AIC, BIC, and deviance all decreased and the test was significant. This supports our hypothesis that the effect of dose on JO2 production varies based on the substrate.
+
+Next, we examined the residual plots to check the model assumptions. For our primary hypothesis, a Q-Q plot and residual plots can be found in Figure \@ref(fig:model1-evals). As you can see from the residual plots, there doesn’t seem to be any major patterns in the residuals, supposing independence. They are relatively evenly spread without heteroscedasticity, supposing our assumption of constant variance. Additionally, there is only a slight deviation from the Q-Q plot, indicating that the assumption of normality is satisfied. Note, this was not true when we tested the model including doses of -12.95.
+
+For the second model used to determine if the effect of substrate varies across substrate the results of the residual plots were similar. However, there did seem to be a slight trend and fanning when examining Pearson residuals versus dose (see Figure \@ref(fig:fig-7)). From this, we wondered if a linear mixed model was suitable in capturing the variation in the data, and considered that there may be more variation than we would have had if the residuals were normally distributed.
+
+To check for this and potentially examine a model with a bit more residual flexibility, we fit a gamma mixture mode. Gamma seemed like a good option because we knew our support would be over positive continuous values. However, the gamma mixture ended up producing clear underdispersion (the fit revealed a dispersion estimate of 0.0162). In fact, this revealed two ideas: the linear mixture model was a better fit for the data than a gamma mixture model. Additionally, the underdispersion caused us to worry about the inference we would do. If we had used a gamma fit that was significantly underdispersed, our inference would have been significantly more conservative, meaning that we were likely to miss significant effects. For this reason, we chose to continue using the linear mixture model.
+
+# Results
+
+## Effect of Genotype on JO2
+
+Based on our model results in Table \@ref(tab:tab-2), the genotype of a mouse had a significant effect on observed JO2 with a p-value near 0, well below our threshold of 0.05. A mouse that is transgenic is on average expected to have a measured JO2 10,353 higher than a non-transgenic mouse when controlling for substrate, dose, and pair. From the random effect on pair, we computed the intra-class correlation (ICC) of 0.5639. This means that about 56% of the total variability in JO2 is due to differences between pairs, the rest is due to within-pair noise.
+
+## Differential Effect of Genotype Across Substrates
+
+Accounting for multiple testing, we used the Holm–Šidák correction to adjust the p-values from multiple comparisons (Table \@ref(tab:tab-3)). The results suggested that PM and PMOC are not statistically significant, meaning their effects don’t hold up after adjustment. Ultimately, the Holm–Šidák adjustment showed that two of the predictors, PM and PMOC, were not significant, while the other substrates sharply reduced the outcome (PCM and PMPC) while OCM slightly increased the outcome. We really also care about whether transgenic status has a difference in substrate effect. We see that it does. With both PCM and PMPC, we will tend to have a higher JO2 in the transgenic mice cases.
+
+# Conclusion, Limitations, and Future Work
+
+## Conclusion
+
+To reiterate, we drew the following main conclusions from this process. For Objective 1, we did find a genetic association with mitochondrial efficiency, with our model finding a significant effect of genotype on observed JO2. In particular, transgenic mice on average are expected to have a measured JO2 that is higher than a non-transgenic mouse when controlling for substrate, dose, and pair.
+
+For Objective 2, we concluded that there is a significant genetic effect depending on substrate, excluding PM and PMOC. Our Holm–Šidák correction indicated that aside from those two substrates, all other substrates had a significant impact on observed JO2 values, with PCM and PMPC reducing the outcome value while OCM increased the outcome.
+
+## Limitations and Future Work
+
+Some limitations we faced included the small dataset, which came with a risk of overfitting, the implication of which is that our model might learn too much noise from the data. Additionally, in the original dataset, the 6th pair of mice (NG6 and Tg6) were missing values for all dosage levels for OCM and PCM aside from the baseline and -12.95, which were both excluded, and therefore were not represented in our data or model.
+
+The exclusion of data from the baseline could have potentially provided additional information about substrates and would potentially be useful in a further study. Additionally, while we chose to remove -12.95 due to violations of non-linearity, we remain skeptical of the researchers assumptions without explanation. Typically, doses are known to follow a "dose response curve" where lower and higher doses are less effective (lag and plateau effect). It is plausible that the range of doses the researchers are using could represent a middle ground where the effect is linear, though. It is unclear whether or not the assumption of linearity is truly valid.
+
+Furthermore, we would like to continue experimenting with alternate modeling approaches as we are not completely satisfied with the assumption of normally distributed. Future work may consist of fine-tuning and experimentation with additional models to resolve these issues. Finally, while we did evaluate differential effects of genotype across substrates we did not do the same across dosages. Additional work may evaluate this by include an interaction term between genotype and dose.
+
+\newpage
+
+# Appendix
+
+```{r include=FALSE}
+#| label: load-packages
+#| message: false
+
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(kableExtra)
+library(glmmTMB)
+library(broom.mixed)
+library(gridExtra)
+library(RColorBrewer)
+library(patchwork)
+```
+
+```{r include=FALSE}
+#| label: load-data
+#| message: false
+
+jo2 <- read_csv("JO2.csv", show_col_types = FALSE)
+colnames(jo2) <- jo2[1, ]
+jo2 <- jo2[-1, ]  # drop the first row now that it's column names
+```
+
+```{r include=FALSE}
+#| label: pivot
+#| message: false
+
+df_long <- jo2 |>
+  pivot_longer(
+    cols = -Subject,
+    names_to = "dose",
+    values_to = "jo2",
+    values_transform = list(jo2 = as.character)  # force everything to character
+  ) |>
+  mutate(jo2 = as.numeric(jo2))  # convert back where possible
+```
+
+```{r include=FALSE}
+#| label: add-substrates
+#| message: false
+
+conditions <- c("GM", "PM", "PCM", "PMPC", "PMOC", "OCM")
+
+df_long <- df_long |>
+  group_by(Subject) |>
+  mutate(
+    substrate = rep(conditions, each = 7, length.out = n()),
+  ) |>
+  ungroup()
+```
+
+```{r include=FALSE}
+#| label: genotype-pair
+#| message: false
+
+df <- df_long |>
+  extract(Subject, into = c("is_transgenic", "pair"), 
+          regex = "([A-Za-z]+)([0-9]+)") |>
+  filter(!(pair == "6" & substrate == "OCM")) |>
+  filter(!(pair == "6" & substrate == "PCM")) |>
+  mutate(
+    pair = as_factor(pair),
+    is_transgenic = if_else(is_transgenic == "NT", 0L, 1L) 
+  )
+```
+
+```{r include=FALSE}
+#| label: cleaning
+#| message: false
+
+df <- df |>
+  filter(!dose == "Basal") |> # drop basal
+  mutate(dose = as.numeric(dose))
+```
+
+```{r fig-1, fig.width = 6, fig.height = 2.5, fig.cap="Line plot displaying the relationship between dose and JO2, colored by genotype. Points represent individual observations while lines represent the line of best fit for each genotype. The pattern for both genotypes appears rather similar, although JO2 is greater for transgenic trials."}
+#| message: false
+#| echo: false
+
+df$Genotype <- ifelse(grepl("0", df$is_transgenic), "Non-Transgenic", "Transgenic")
+
+ggplot(df, aes(x = dose, y = jo2, color = Genotype)) +
+  geom_point(alpha = 0.8) +
+  geom_smooth(method = "lm", se = FALSE) +  
+  labs(
+    title = "JO2 Production by Dose and Genotype",
+    x = "Dose",
+    y = "JO2"
+  ) +
+  theme_minimal()
+```
+
+```{r fig-2, fig.width = 6, fig.height = 2.5, fig.cap="Box plot showing the quantiles for JO2 for each of the 6 substrates, grouped by genotype. Clear differences can be observed between the substrates. Within all substrates, the median JO2 is greater for transgenic mitochondria."}
+#| message: false
+#| echo: false
+
+ggplot(df, aes(x = substrate, y = jo2, fill = Genotype)) +
+  geom_boxplot() +
+  labs(title = "JO2 Production by Genotype and Substrate",
+       x = "Condition",
+       y = "JO2 Value") +
+  theme_minimal()
+```
+
+\newpage
+
+```{r fig-3, fig.cap="A set of plots showing the relationship between dose and JO2 faceted by substrate and colored by genotype. Differences across substrates, across genotypes, and across dosages are visible. However, there does not seem to be any signifcant three way interaction between dose, genotype, and substrate as all 6 curves have similar shapes and trends.", fig.width = 9, fig.height = 4}
+#| message: false
+#| echo: false
+
+ggplot(df, aes(x = dose, y = jo2, 
+               color = factor(is_transgenic), group = is_transgenic)) +
+  geom_smooth(aes(group = interaction(substrate, is_transgenic)), 
+              method = "loess", se = TRUE, linewidth = 1.2) +
+  facet_wrap(~substrate) +
+  scale_color_discrete(name = "Genotype",
+                       labels = c("Non-transgenic", "Transgenic")) +
+  labs(x = "Dose", y = "JO2", title = "JO2 Production by Dose, Genotype and Substrate") +
+  theme_bw()
+```
+
+```{r fig-4, fig.width = 6, fig.height = 2.2, fig.cap="Each point is the estimated random intercept for a batch. Positive values mean that batch tends to have higher JO2 than average; negative values mean lower JO2. Error bars are 95% confidence intervals. Clear differences are seen between pairs of mice, indicating a need to include a batch effect in modeling."}
+#| message: false
+#| echo: false
+
+m <- lmer(jo2 ~ is_transgenic + dose + substrate + (1|pair), data = df)
+
+# Extract random effects with conditional variances
+re <- ranef(m, condVar = TRUE)
+
+# Get the random intercepts for "batching"
+batch_re <- re$pair
+batch_df <- data.frame(batch = rownames(batch_re), intercept = batch_re[,"(Intercept)"])
+
+# Extract posterior variances (needed for CI)
+post_var <- attr(re$pair, "postVar")
+
+# Add CI columns
+batch_df$se <- sqrt(sapply(1:dim(post_var)[3], function(i) post_var[,,i]))
+batch_df$ci_low <- batch_df$intercept - 1.96 * batch_df$se
+batch_df$ci_high <- batch_df$intercept + 1.96 * batch_df$se
+
+ggplot(batch_df, aes(x = batch, y = intercept)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(
+    title = "Random intercepts for batching",
+    x = "Batch",
+    y = "Estimated Deviation from Overall Mean JO2",
+  ) +
+theme(
+    plot.caption = element_text(hjust = 0.5)
+  ) +
+  theme_minimal()
+
+```
+
+\newpage
+
+```{r}
+#| label: modeling-df
+#| include: false
+
+df <- df |> # without problematic -12.95
+  filter(!(dose == -12.95))
+```
+
+```{r tab-1}
+#| label: anova
+#| echo: false
+
+# testing if interaction term was good
+with_interaction <- lmer(jo2 ~ substrate + dose + is_transgenic + substrate:dose + (1 | pair),
+                    data = df, REML = FALSE)
+
+without_interaction <- lmer(jo2 ~ substrate + dose + is_transgenic + (1 | pair),
+                       data = df, REML = FALSE)
+
+# drop-in-deviance test (LRT)
+anova_out <- anova(without_interaction, with_interaction, test = "Chisq")
+kable(
+  as.data.frame(anova_out),
+  digits = 3,
+  caption = "Results of a two-way ANOVA test evaluating the addition of an interaction between substrate and dose. Lower AIC, BIC, and deviance indicate better fit, as does higher log likelihood."
+) |> 
+  kable_styling(latex_options = "HOLD_position" )
+```
+
+```{r fig-5, fig.cap="Set of model evaluation plots. Note the relative lack of patterns in the residual plots and only a slight deviation in the Q-Q plot. None of our assumptions are violated."}
+#| label: model1-evals
+#| echo: false
+#| message: false
+
+fit_lmm <- lmer(
+  jo2 ~ substrate + dose + is_transgenic + substrate*dose + (1 | pair),
+  data = df
+)
+
+df$resid <- resid(fit_lmm)
+df$fitted <- fitted(fit_lmm)
+
+p1 <- ggplot(df, aes(x = fitted, y = resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals")
+
+p2 <- ggplot(df, aes(sample = resid(fit_lmm))) +
+  stat_qq() +
+  stat_qq_line() +
+  theme_minimal() +
+  labs(title = "QQ Plot of Residuals")
+
+p3 <- ggplot(df, aes(x = substrate, y = resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Residuals vs. Substrate", y = "Residuals", x = "Substrate")
+
+p4 <- ggplot(df, aes(x = dose, y = resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Residuals vs. Dose", y = "Residuals", x = "Dose")
+
+(p1 | p2) / (p3 | p4)
+```
+
+```{r tab-2}
+#| echo: false
+
+# get tidy output with CIs
+tab2 <- tidy(fit_lmm, conf.int = TRUE, conf.level = 0.95, effects = "fixed")
+tab2 <- tab2[ , !(names(tab2) %in% "effect") ]
+kable(
+  tab2,
+  digits = 3,
+  caption = "Linear mixed model coefficients with substrate GM as baseline"
+) |>
+  kable_styling(latex_options = "hold_position")
+```
+
+```{r}
+#| label: compute-icc
+#| echo: false
+#| include: false
+
+# Compute ICC = variance(pair) / (variance(pair) + residual variance)
+vc <- as.data.frame(VarCorr(fit_lmm))
+icc <- vc$vcov[vc$grp == "pair"] / sum(vc$vcov)
+
+```
+
+```{r fig-6, fig.width = 8, fig.height=4.5, fig.cap="Lines show predicted JO2 based on our linear mixed model assessing genotype effect. Dots represent actual observations. It's clear that transgenic mitochondria produce more JO2 than their non-transgenic counterparts."}
+#| echo: false
+#| message: false
+#| include: false
+
+df$predicted <- predict(fit_lmm, re.form = NA) # get rid of re.form=NA to include RE
+df$is_transgenic <- factor(df$is_transgenic, labels = c("Non-transgenic", "Transgenic"))
+
+ggplot(df, aes(x = dose, y = jo2, color = is_transgenic)) +
+  geom_point(alpha = 0.5) +                 # observed data
+  geom_line(aes(y = predicted)) +         # fitted lines
+  facet_wrap(~ substrate) +        # one panel per substrate
+  labs(x = "Dose",
+       y = expression(J[O[2]]),
+       color = "Genotype",
+       title = "Predicted JO2 by Substrate and Genotype") +
+  theme_bw()
+```
+
+\newpage
+
+```{r}
+#| label: holm-sidak
+
+# Holm-Sidak taking in p-values and outputting adjusted p-values
+holm_sidak <- function(pvals, alpha = 0.05) {
+  m <- length(pvals)
+  ord <- order(pvals)
+  p_sorted <- pvals[ord]
+  
+  p_adj <- numeric(m)
+  p_adj[1] <- 1 - (1 - p_sorted[1])^m
+  for (j in 2:m) {
+    p_adj[j] <- 1 - (1 - p_sorted[j])^(m - j + 1)
+    if (p_adj[j] < p_adj[j-1]) {
+      p_adj[j] <- p_adj[j-1]
+    }
+  }
+  
+  reject <- p_adj <= alpha
+  
+  results <- data.frame(
+    original_p = pvals,
+    adjusted_p = p_adj[order(ord)],
+    reject = reject[order(ord)]
+  )
+  return(results)
+}
+```
+
+```{r}
+#| label: model2
+#| include: false
+
+fit <- lmer(jo2 ~ substrate + dose + substrate*is_transgenic + 
+              dose*substrate + is_transgenic + (1 | pair), data = df)
+s <- summary(fit)
+```
+
+```{r fig-7, fig.width = 8, fig.height=5, fig.cap="Residuals for linear mixed model with substrate-genotype interaction. Note some minor heteroskedacity and trends in the residual plots.", echo = FALSE, message=FALSE, warning=FALSE}
+
+resid_vals <- residuals(fit)
+fitted_vals <- fitted(fit)
+df$resid <- resid_vals
+
+# Prepare data
+df_resid <- df |>
+  mutate(
+    Residuals = resid(fit),
+    Fitted = fitted(fit),
+    substrate = as.factor(substrate),
+    is_transgenic = as.factor(is_transgenic)
+  )
+
+p1 <- ggplot(df_resid, aes(x = substrate, y = Residuals, color = substrate)) +
+    geom_point(alpha = 0.6) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "darkred") +
+    theme_minimal(base_size = 14) +
+    labs(
+      x = "Substrate",
+      y = "Residuals",
+      title = "Residuals vs Substrate",
+    ) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),  # smaller title
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),  # tilted x-axis labels
+      legend.position = "none"
+    )
+
+p2 <- ggplot(df_resid, aes(x = dose, y = Residuals, color = dose)) +
+    geom_point(alpha = 0.6) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "darkred") +
+    geom_smooth(method = "loess", se = FALSE, color = "blue", size = 1) +
+    theme_minimal(base_size = 14) +
+    labs(
+      x = "Dose",
+      y = "Residuals",
+      title = "Residuals vs Dose",
+    ) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),  # smaller title
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),  # tilted x-axis labels
+      legend.position = "none"
+    )
+
+p3 <- ggplot(df_resid, aes(x = Genotype, y = Residuals, color = Genotype)) +
+    geom_point(alpha = 0.6) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "darkred") +
+    theme_minimal(base_size = 14) +
+    labs(
+      x = "Genotype",
+      y = "Residuals",
+      title = "Residuals vs Genotype",
+    ) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),  # smaller title
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),  # tilted x-axis labels
+      legend.position = "none"
+    )
+
+(p1 | p2 | p3)
+
+```
+
+```{r tab-3, echo = FALSE}
+
+# Obtain input for table
+coef_table <- as.data.frame(s$coefficients)
+pvals <- coef_table[, "Pr(>|t|)"]
+adj <- holm_sidak(pvals, alpha = 0.05)
+
+# Output table
+coef_table$Adjusted_p <- adj$adjusted_p
+coef_table$Significant <- adj$reject
+coef_table |>
+  select(-c(df, `t value`)) |>
+  kable(digits = 2, caption = "Estimates and signifance for model with substrate-genotype interaction") |>
+  kable_styling(
+    full_width = FALSE,
+    bootstrap_options = c("striped", "hover", "condensed")
+  ) |>
+  row_spec(
+    which(coef_table$Significant),
+    bold = TRUE,
+    color = "white",
+    background = "pink"
+  ) |>
+  column_spec(1, bold = TRUE, color = "black") |>  # Predictor names bold
+  column_spec(2, color = "blue") |>                # Estimates in blue
+  column_spec(5, color = "#006400")                # Adjusted p-values in green
+
+```
+
+```{r echo = FALSE}
+#| label: gamma-fit
+#| include: false
+
+# Example: continuous positive outcome y, random intercept for 'group'
+fit_gamma <- glmmTMB(
+ jo2 ~ substrate + dose + dose*substrate + substrate*is_transgenic + is_transgenic + (1 | pair),
+  data = df,
+  family = Gamma(link = "log")
+)
+```
+
+```{r}
+#| label: gamma-dispersion
+#| include: false
+
+# Deviance residuals
+resid_dev <- residuals(fit_gamma, type = "deviance")
+
+# Pearson residuals (standardized)
+resid_pearson <- residuals(fit_gamma, type = "pearson")
+
+overdispersion <- sum(resid_pearson^2) / df.residual(fit_gamma)
+overdispersion
+```
