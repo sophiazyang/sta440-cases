@@ -1,0 +1,263 @@
+---
+title: "Effects of 2003 and 2011 Residency Work-Hour Reforms on Exam Pass Rates"
+author: "Olivia Fu, Brian Kim, Sophia Yang"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  bookdown::pdf_document2:
+    latex_engine: xelatex
+    toc: false
+  bookdown::html_document2:
+    toc: true
+    number_sections: true
+    fig_caption: true
+editor: visual
+---
+
+# Background and Motivation
+
+Medical residency is a demanding stage of training with long work hours, so in 2003 and 2011 reforms were added that limited the number of hours medical residents could work. In 2003, residents became limited to a maximum of 80 hours per week while in the 2011 reform placed more specific limitations on the types of activities. We want to determine if changes in work hours affected residency exam pass rates. In particular, did more study time from the limited work hours lead to higher pass rates or did it have the opposite effect by providing them less clinical exposure and therefore leading to a lower pass rate? The goal of our analysis is to determine how exam pass rates do or do not differ across the three time periods of pre-reform (1996–2002), 2003 reform (2003–2010), and 2011 reform (2011–2015).
+
+# Data and Exploratory Analysis
+
+Our dataset contains data for first-time medical residency examinees in an undisclosed field. Each row represents a single year. It has three variables representing the year (`Year`), number of students taking the exam (`N`), and the percentage of examinees who passed (`Pct`).
+
+To begin, we plotted certification exam pass rates and number of examinees by year in Figure \@ref(fig:fig-1). In this plot, we observed a sharp increase in pass rates after the 2003 reform with pass rates peaking in 2007, before declining. The decline in pass rates seems to coincide with an increase in the number of students attempting the exam from 2007 to 2010, raising into question if this change in pass rate may partially be the result of less qualified students who previously avoided the exam choosing to take the resident exam. Yet, despite continual increases in the number of examinees, pass rates eventually rose again starting in 2011. While the percentage of passes in 2015 is less than the peak in 2007, it is still higher than pass rates in the pre-reform period.
+
+Table 1 shows mean pass rates and slopes by reform period. The pass rates were lowest on average during pre-reform period with a mean of about 85.3% but also showed an average increase in pass rate by 0.821% per year. During the 2003 reform the mean pass rate increased to 90.9% while pass rates trended downward, declining by 0.655% each year. Although the pass rates were on average higher than during other time periods, performance declined during this period. Finally, during the 2011 reform period, the mean pass rates returned to near pre-reform rates at about 86.2%. However, the positive slope of 1.2% could suggest a higher average exam pass rate in the future.
+
+# Model Selection, Implementation, and Evaluations
+
+## Selection
+
+We chose a quasibinomial model with a logit link to analyze the pass rates of medical residents. For the sampling model, each year’s outcome is the number of residents passing out of the total number of test-takers. This naturally suggests a binomial model, since each candidate either passes or fails in a given year. However, analysis in class revealed evidence of overdispersion in this dataset, so we used the quasibinomial specification to allow the variance to be larger than the standard binomial assumption.
+
+-   $S_y \sim \text{Binomial}(N_y, \pi_y)$, where $S_y$ = number passing in year $y$.
+-   $N_y$ = number of test-takers.
+-   $\pi_y$ = probability of passing in year $y$.
+
+To model the passing rate, we employed a logistic regression. The logit link ensures that predicted probabilities stay between 0 and 1. Intuitively, the model is piecewise linear in the log-odds of passing, with separate linear trends estimated for the three time periods.
+
+$$
+\text{logit}(\pi_y) \;=\; 
+\beta_0 \;+\; \beta_1 \cdot \text{Year} \;+\; \beta_2 \cdot 1_{\{tp2\}} \;+\; \beta_3 \cdot 1_{\{tp3\}}
+\;+\; \beta_4 \cdot (\text{Year} \times 1_{\{tp2\}}) \;+\; \beta_5 \cdot (\text{Year} \times 1_{\{tp3\}})
+$$
+
+The choice of predictors was motivated by exploratory plots (Figure \@ref(fig:fig-1)) and summary tables (Table 1), which showed distinct level shifts and slope changes across periods separated by the 2003 and 2011 reforms. We therefore included indicators for time periods and their interactions with Year. This formulation allows each time period to have its own intercept and slope, thereby capturing both immediate reform effects (intercept shifts) and longer-term changes in trend (slope differences).
+
+We also considered the effect of cohort size. Figure \@ref(fig:fig-1) shows that the number of test-takers varied each year, with a gradual increase from 2003 to 2015. To evaluate the potential impact of cohort size on pass rates, we also added N (number of test-takers) to the model. Since the effect was not statistically significant, we did not include N in the final model.
+
+## Implementation
+
+Models were fit in R using the `glm()` function with a quasibinomial family and logit link. The response was specified as `cbind(Pass, Fail)` to reflect binomial counts. `Year` was centered at the relevant reform year (2003 or 2011) to make the intercepts more interpretable. Interaction terms between Year and time periods were included to estimate both intercept shifts and slope changes associated with the reforms.
+
+## Evaluation
+
+We evaluated the model using both tests and diagnostic plots.
+
+We first conducted a drop-in-deviance test to evaluate whether including interaction terms improved the model. As shown in Table 2, the deviance dropped substantially when moving from the simpler additive model to the model with interactions, and the associated F-test had a very small p-value. This provides strong evidence that we should keep the interaction terms between Year and time period, allowing each time period to have its own slope.
+
+Second, we assessed overdispersion. The estimated dispersion parameter (hat 𝜙=12.24) is much larger than 1, confirming substantial overdispersion. Likely contributors include: (i) outliers in the dataset, (ii) heterogeneity in test-takers’ passing probabilities, and (iii) unobserved factors such as exam difficulty or changes in scoring standards across years. The quasibinomial model accounts for the extra-variation in the data by adjusting the estimated variance.
+
+Finally, we assessed goodness-of-fit using deviance residual plots. Figure \@ref(fig:fig-2) (residuals vs. fitted values) shows residuals mostly scattered around 0 with no clear patterns, indicating the model fits reasonably well. One notable exception is 2007, which has a very large residual; with only 20 observations in our dataset, this outlier is influential and likely inflates overdispersion. We also examined residuals vs. Year (Figure \@ref(fig:fig-3)) to assess whether the model reflected trends over time. Residuals again scatter randomly around 0 with no systematic trends, suggesting the piecewise-linear structure (tp1/tp2/tp3 with separate slopes) is adequate to capture time patterns.
+
+# Results
+
+Our model found that the reform in 2003 (`timeperiodtp2`) had a positive increase in log-odds pass rates by 0.571 relative to the pre-reform time period (Table 3). This implies that without the 2003 reform, the log-odds of passing in 2003 would have been 0.571 lower than observed. Using an alpha of 0.05, this result is statistically significant with a p-value of 0.001. This is contrary to the negative slope of the period, potentially indicating a short term positive effect (Figure \@ref(fig:fig-4)). This could be a signal that in the long term the effects are diminished as students get used to the new normal.
+
+In contrast, the 2011 reform (`timeperiodtp3`) had a slight decrease in the log-odds of passing by 0.313 relative to the preceding period (Table 4). While slight, this decrease is significant with a p-value of 0.039 and the 95% confidence interval does not include 0 (-0.583, -0.045). This result was derived by fitting the same model, but with `Year` recentered at 2011 and time period 2 set as the baseline. While pass rates were overall lower than they were in time period 2, they revert the prior trend of declining pass rates and appear to continually trend upwards (Figure \@ref(fig:fig-4)). Given more time, the 2011 reform may be a long term beneficial change.
+
+# Limitations and Conclusion
+
+Our analysis has certain limitations. Due to the limited years of data, it is difficult to establish a strong baseline and effect of the model. Our model uses a single dispersion parameter and hence assumes overdispersion is constant rather than varying over time. We also did not take into account the length of the typical residency program of 3 years. This length might indicate the presence of a lagged effect in which the full effect of the reform is not felt until two or three years after it began. This could be addressed by weighing the year further after a reform more or by using lagged versions of variables (e.g. considering the second year after a reform as the actual first year of the reform). Additional directions for improvement include introducing more variability as exam takers are likely a heterogeneous group. Referencing of other adjacent datasets such as from the MCAT could also help us evaluate if there were changes in the caliber of student entering residency programs.
+
+In summary, we found that there were significant changes in residency pass rates following both reforms. From our model, we observed that the reform in 2003 had a significant but potentially temporary positive effect on pass rates for the medical residency exam. On the other hand, when compared to the 2003 reform period, the reform in 2011 had a slight negative effect. However, the 2011 reform appears to have reversed a downward trend in pass rates and may have a long lasting positive effect in the future.
+
+\pagebreak
+
+# Appendix
+
+```{r app-libs, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(broom)
+library(scales)
+library(kableExtra)
+
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+# Load data
+x <- read.table("./data.txt", header = TRUE, as.is = TRUE)
+
+# Calculate Pass and Fail counts
+x$Pass <- round(x$N * x$Pct)
+x$Fail <- x$N - x$Pass
+
+# Define time periods
+x$timeperiod <- 1
+x$timeperiod[x$Year > 2002] <- 2
+x$timeperiod[x$Year > 2010] <- 3
+
+# Convert to factor with labels
+x$timeperiod <- factor(
+  x$timeperiod,
+  levels = c(1, 2, 3),
+  labels = c("tp1", "tp2", "tp3")
+)
+```
+
+```{r fig-1, fig.cap="Blue points represent the proportion of test takers who passed. Gray bars represent the total number of students taking the exam, labeled on the right axis. Observe that the increase in pass rate from 2000 to 2003 aligns with a decrease in the number of students taking the exam. Similarly, pass rates declined in 2007-2011 while the number of students increased over the same time frame."}
+
+# Scaling factor so N and Pct can share an axis
+scale_factor <- max(x$Pct, na.rm = TRUE) / max(x$N, na.rm = TRUE)
+
+ggplot(x, aes(x = Year)) +
+  geom_col(aes(y = N * scale_factor), fill = "gray80") +
+  geom_point(aes(y = Pct), color = "blue", size = 2) +
+  geom_line(aes(y = Pct), color = "blue") +
+  geom_vline(xintercept = c(2003, 2011), linetype = "dashed", color = "red") +
+  scale_y_continuous(
+    name = "Pass Rate",
+    sec.axis = sec_axis(~ . / scale_factor, name = "Number of Students")
+  ) +
+  labs(title = "Certification Exam Pass Rate From 1996 to 2015", x = "Year") +
+  coord_cartesian(ylim = c(0.8, 1)) +
+  theme_minimal()
+```
+
+```{r}
+mean_and_slope <- x |>
+  group_by(timeperiod) |>
+  summarise(
+    MeanPassRate = mean(Pct),
+    SlopePct = coef(lm(Pct ~ Year))[2] * 100
+  ) |>
+  mutate(timeperiod = case_when(
+    timeperiod == "tp1" ~ "Pre-reform",
+    timeperiod == "tp2" ~ "2003 Reform",
+    timeperiod == "tp3" ~ "2011 Reform",
+  ))
+
+kable(
+  mean_and_slope,
+  digits = 3,
+  caption = "Mean pass rates and slope by period."
+) |> 
+  kable_styling(latex_options = "HOLD_position")
+```
+
+```{r}
+# Center years
+x$Year_centered_2003 <- x$Year - 2003
+x$Year_centered_2011 <- x$Year - 2011
+
+# Additive model (without interaction)
+model <- glm(
+  cbind(Pass, Fail) ~ Year_centered_2003 + timeperiod,
+  family = quasibinomial(link = "logit"),
+  data = x
+)
+
+# Interaction model (with interaction)
+model2 <- glm(
+  cbind(Pass, Fail) ~ Year_centered_2003 * timeperiod,
+  family = quasibinomial(link = "logit"),
+  data = x
+)
+```
+
+```{r}
+anova_out <- anova(model, model2, test = "F")
+kable(
+  as.data.frame(anova_out),
+  digits = 3,
+  caption = "Drop-in-deviance comparing additive vs interaction quasibinomial models."
+) |> 
+  kable_styling(latex_options = "HOLD_position")
+```
+
+```{r}
+kable(
+  tidy(model2, conf.int = TRUE, conf.level = 0.95),
+  digits = 3,
+  caption = "Coefficients with Year centered at 2003 and time period 1 as the baseline (quasibinomial logit)."
+) |> 
+  kable_styling(latex_options = "HOLD_position")
+```
+
+```{r}
+# Relevel tp2 as baseline for direct tp3 vs tp2 contrast
+x$timeperiod <- relevel(x$timeperiod, ref = "tp2")
+
+model3 <- glm(
+  cbind(Pass, Fail) ~ Year_centered_2011 * timeperiod,
+  family = quasibinomial(link = "logit"),
+  data = x
+)
+
+kable(
+  tidy(model3, conf.int = TRUE, conf.level = 0.95),
+  digits = 3,
+  caption = "Coefficients with Year centered at 2011 and time period 2 as the baseline (quasibinomial logit)."
+) |> 
+  kable_styling(latex_options = "HOLD_position")
+```
+
+```{r fig-2, fig.cap="Deviance residuals vs. fitted pass rate. Points cluster around the zero line with no clear pattern, indicating an adequate overall fit. One large residual in 2007 stands out; with only 20 observations, this outlier is influential and likely inflates overdispersion.", fig.width=5, fig.height=3, out.width="80%"}
+
+fitted_vals  <- fitted(model2)
+deviance_res <- residuals(model2, type = "deviance")
+
+plot(fitted_vals, deviance_res,
+     xlab = "Fitted pass rate",
+     ylab = "Deviance residuals")
+abline(h = 0, lty = 2)
+```
+
+```{r fig-3, fig.cap="Deviance residuals vs. year. Residuals remain randomly scattered around zero without visible time trends, supporting the piecewise-linear specification (tp1/tp2/tp3 with separate slopes) as properly capturing temporal patterns.", fig.width=5, fig.height=3, out.width="80%"}
+
+plot(x$Year, deviance_res,
+     xlab = "Year",
+     ylab = "Deviance residuals")
+abline(h = 0, lty = 2)
+```
+
+```{r fig-4, fig.cap="Lines show the predicted pass rate for that year based on the quasibinomial model. The shaded areas represent the 95% confidence intervals. Black points represent actual observations. Note positive trends in pass fail rate during the 1996-2002 and 2011-2015 time periods. 2003-2010 shows an initial increase in pass rates but then declines in the later two years.", fig.width=6, fig.height=4}
+
+pred <- predict(
+  model2,
+  type  = "link",       # logit scale
+  se.fit = TRUE
+)
+
+# Transform to probability scale and compute 95% CIs
+x$pred <- plogis(pred$fit)
+x$lwr  <- plogis(pred$fit - 1.96 * pred$se.fit)
+x$upr  <- plogis(pred$fit + 1.96 * pred$se.fit)
+
+# Label with more informative names
+x$timeperiod <- factor(
+  x$timeperiod,
+  levels = c("tp1", "tp2", "tp3"),
+  labels = c("Pre-reform", "2003 Reform", "2011 Reform")
+)
+
+ggplot(x, aes(x = Year, y = Pct)) +
+  geom_point() +
+  geom_line(aes(y = pred, color = timeperiod)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr, fill = timeperiod),
+              alpha = 0.2, color = NA) +
+  geom_vline(xintercept = c(2003, 2011), 
+             linetype = "dashed", color = "red") +
+  labs(
+    title = "Pass Rates and Quasibinomial Fit (with 95% CI)",
+    x = "Year",
+    y = "Pass Rate",
+    color = "Time Period",
+    fill  = "Time Period",
+  ) +
+  theme_minimal()
+```
