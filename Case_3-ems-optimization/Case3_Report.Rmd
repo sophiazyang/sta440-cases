@@ -1,0 +1,867 @@
+---
+title: "Optimizing Ambulances in Vance County"
+author: "Ayush Batra, Woonggyu Jin, Sophia Yang"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  bookdown::pdf_document2:
+    latex_engine: xelatex
+    toc: false
+    extra_dependencies: ["float"]
+  bookdown::html_document2:
+    toc: true
+    number_sections: true
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+# Background and Motivation
+
+Emergency medical services (EMS) are a critical part of the medical system, responsible for saving lives in times of crisis. Common medical situations EMS are responsible for include emergencies such as cardiac arrest, penetrating trauma, brain injury, stroke, and overdose. The faster EMS can reach a patient, the better their chances of death or development of severe health complications are. For instance, the chance of 30-day survival of cardiac arrest drops from 19.5% for 0-6 minutes to 13.8% for 7-9 minutes to 9.4% for 10-15 minutes (Rawshani et al., 2020). Minutes and seconds are of critical importance for these patients lives.
+
+In order to reach emergencies, ambulances are dispatched. Vance County, NC has four ambulances stationed at two EMS stations. In the current situation, there are three ambulances at the center station and one ambulance at the southern station. This decision was made based on the population distribution of the county with the main city of Henderson in the center and more people living in the south than the north, where Kerr Lake is situated. However, it has been observed that the number of calls from the northern region has increased by 37% between 2019 and 2022. This shift in need raises the question of whether or not the county's ambulances could be better allocated and if a northern EMS station should be constructed. Two northern stations have been proposed with one being farther north and the other being closer to the central region. The four alternative arrangements for ambulances we are considering can be found in Table 1.
+
+# Data and Exploratory Analysis
+
+## Data
+
+Our dataset consists of hundreds of emergency dispatches which were masked and subset from real Vance County ambulance responses. Rows include information on where the call came from, call priority, the ambulance that responded, which station the ambulance came from, which (if any) hospital was the patient transported to, time of response steps (dispatch, starting enroute, arrival at scene, leaving the scene, arrival at hospital, available for next dispatch), and others. The actual dates are not accurate, for privacy. Additionally, we were provided with estimated travel times in seconds from the Google Maps API under four traffic models: unadjusted, pessimistic, best-guess, and optimistic.
+
+We noted that a couple calls were made outside of the borders of Vance County and chose to drop these observations as they are not representative of our goal of optimizing response time to calls within Vance County. A map of all calls can be seen in Figure 1. Additionally, we dropped observations in which no ambulance was reported to have arrived on scene, indicating that no medical attention from the EMS was needed.
+
+## Exploratory Data Analysis
+
+To begin, we wanted to find out how the EMS response times varied by region; specifically, we looked at the response times for calls in the North compared to the rest of the county. Figure 4 displays that calls from the North do indeed tend to have longer response times, as the median response time is over 2 minutes slower than calls from the Central or South. 
+
+We also wanted to determine the distribution of calls and their proximity to each of the four EMS stations (two existing stations and the proposed near north and far north). Figure 5 shows the proportion of calls for which the minimal estimated travel time is that station. From this plot we can see that the Central station is closest to the majority of calls, while the Far and Near North stations are often not the best option. Thus, there is initial evidence towards a Near North station being more advantageous than a Far North station. 
+
+Another issue we have to address is the problem of ambulance conflicts. Suppose a call from the south is made but the ambulance at the south station is busy with a prior dispatch. Figure 3 seeks to answer the question of how often these load conflicts occur. For 1.9% of calls, all of the ambulances were busy, and the corresponding calls had to wait for the next available ambulance to be dispatched. For most of the calls (56.1%) all the ambulances were available and ready for dispatch.
+
+Additionally, we wondered if there might be a temporal solution to allocation. For instance, perhaps visitors to Kerr Lake peak on weekends and show a shift in emergency calls towards the north. If this was the case, it would make sense to shift an ambulance up north on weekends. However, in Figure 2 we found that this was not the case. There was no compelling evidence that the proportion of emergency calls from each region changed across time of day or day of the week. We are unable to evaluate seasonal trends from our dataset.
+
+# Modeling
+
+## Implementation
+
+In order to capture the differences between each of the scenarios, we simulated what would happen with the following methodology. To begin, we removed any duplicate calls in which dispatch times and the ambulance responding were identical as well as ambulances that never arrived at the scene, likely a false alarm. Next, we ordered all calls by dispatch time so we can model avaliability. Our dispatch rule was that we selected an ambulance from the subset currently available with the lowest estimated travel time. If all ambulances are busy, the next available ambulance is sent as soon as it has been cleared. We repeated this process for all scenarios and all travel time algorithms.
+
+For our plots we use `ggplot2` and for modeling we use the package `lme4`.
+
+## Model Selection
+
+From our simulated scenarios, we sought to model estimated travel times. However, not all scenarios resulted in changes in travel times. These data points caused violations of model assumptions, so we preformed a preliminary filtering step that removed any calls in which travel time did not vary across any of the scenarios. After filtering, we had 140 unique calls, each with 5 estimated times (one per scenario). 
+
+Next, we created four models, one for each travel time algorithm. Since we are only concerned with how long it takes an ambulance to respond to calls, there is no need to include variables such as distance. We considered adding other predictors, such as time of day or emergency priority, but they did not improve the model, so they were left out. Due to the repetition of rows for the same call under each of the scenarios, we created a variable for call ID upon which we placed a random effect.
+
+Our final model is:
+
+$$
+\text{EstimatedTT}_{ij} = \beta_0 + \beta_1 \cdot \text{Scenario}_{ij} + u_{i} + \epsilon_{ij}
+$$
+
+$$
+u_i \sim \mathcal{N}(0, \sigma_u^2), \quad \epsilon_{ij} \sim \mathcal{N}(0, \sigma^2)
+$$
+
+Alternatively, since scenario is categorical, the expanded form is:
+
+$$
+\text{EstimatedTT}_{ij} = \beta_0 + \beta_1 \cdot \text{S1}_{ij} + \beta_2 \cdot \text{S2}_{ij} +  \beta_3 \cdot \text{S3}_{ij} +  \beta_4 \cdot \text{S4}_{ij} + u_{i} + \epsilon_{ij}
+$$
+
+## Evaluation
+
+First, we ensured our simulation's results were logically consistent by verifying no overlaps in which an ambulance was actively responding to multiple calls at once as well as verifying timing consistency (i.e. dispatch time should be before arrival time).
+
+Next, to evaluate our model, we fit residual plots and looked at other diagnostics. As we can see from Figure 7, modeling assumptions appear to be satisfied and there is no heteroskedasticity. The QQ plot in Figure 7 shows that residuals roughly follow a Normal distribution. We experimented with log transforming our response as well as using a ratio between the baseline and the new scenario but we did not find significant improvements to the model fit.
+
+# Results
+
+Our model results for the Best Guess traffic algorithm can be found in Tables 2. We estimate that estimated travel time decreases by approximately 45 seconds, on average, in the scenario where we move a Central truck a the Near North station (scenario 3). By contrast, all other scenarios see an increase in expected travel time. Across the four traffic algorithms, the estimated coefficient signals a 45-55 second decrease in estimated travel time for scenario 3. Based on the t-value of Table 2, the estimate is just on the threshold of statistical significance. We also computed how often our dispatch rule allocated an ambulances from different stations in the baseline scenario and scenario 3. We found that scenario 3 tends to send an ambulance from a different station than scenario 0 about 10-11% of the time, depending on the traffic algorithm used. 
+
+Additionally, we evaluated how well each scenario deals with load by calculating the optimal station rate, which is the proportion of calls where the ambulance from the closest of the 4 possible stations was dispatched based on estimated travel time. We found that scenario 3 leads to a very small improvement in the optimal station, from 91% in scenario 0 compared to 91.5% in scenario 3 (using Best Guess estimated time). This change is very small, so we conclude that there is no major change in load between the two scenarios. For the remaining scenarios, there is a noticeable decrease in the optimal station rate, meaning they deal with load more poorly than the baseline scenario. 
+
+Figure 6 shows the allocation of ambulances by our dispatch rule in each scenario. Conflicts are very rare, but we do see that there are cases where ambulances are dispatched to areas outside of their region. For instance, in scenario 0 in Figure 6, we see a single call from the North that was handled by an ambulance in the South Station. As it would not be ethical to delay aid when an available ambulance from another region could respond, we chose to allow such cross-regional dispatches to proceed.
+
+Similarly, Figure 8 shows the change in estimated travel times (note to self decrease point size) and highlights the plethora of calls for which scenarios do not change travel time estimates. It seems like the increase in travel times in the south under scenarios 1 and 2 did not offset the decrease in travel times in the north. Meanwhile, allocating an ambulance to far north sees too little usage in the north and overall results in travel time increases for central calls.
+
+# Conclusion, Limitations, and Future Work
+
+## Conclusion
+
+Based on our results, we would recommend Vance County to build the proposed near north station rather than a far north station. The ambulances are best allocated with 1 at south, 2 at central, and 1 at near north. In this arrangement we found a change in estimated travel time of about 45 seconds across travel time estimates compared to the baseline. While this only represents about 10% of calls, any increase in the chance of a patient's survival is valuable. As such, we determined that a Near North station better serves the county than a Far North station, and it is better to move a Central truck rather than the South truck. Without information on cost and a focus on lives, we believe a near north station should be constructed.
+
+## Limitations and Future Work
+
+Our analysis makes many assumptions for simplicity. To begin, our simulations assume that all ambulances begin responding to calls from their stations and that there is no time allocated for transport from hospital/caller back to the station. This assumption works well when the utilization of ambulances is low, but in times where utilization is high it's more likely that the starting location of an ambulance would instead be the hospital. In that case, it does not seem to matter which station the ambulance is from as there is only one hospital in Vance County. Next, we are approximating travel time using the Google Maps API which is not representative of traffic patterns, time of day, road closures, weather, and other factors. It's plausible that ambulances with their sirens on are given significant priority the estimates are too high, but it is also plausible that emergencies tend to cause closure and traffic jams so the estimates are too low. Finally, we only have data from a single month and are hence unable to evaluate if scenarios might be better in different seasons. For instance, it is likely that more people will be in the north during summer months to visit Kerr Lake.
+
+As aforementioned in our methodology, we chose a simplistic dispatch rule that greedily selects the ambulance with the shortest travel time. This is because it is unknown how long it will take for "closer" ambulances to finish their prior commitment and waiting when there is an ambulance available would be unethical. Although, there are very few cases in our dataset where all ambulances are all busy. However, calls of a "non-emergency" priority may not be as critical as emergency calls. In these cases, perhaps an alternative dispatch rule would be to ensure an ambulance is always available for emergency calls. In addition to exploring alternate dispatch rules, future work could include an analysis of seasonal trends and other covariates as well as references to actual cost and health outcome data. Perhaps the cost of building a station would be better allocated towards having more ambulances or building another hospital facility. Health outcomes data would also help determine if there is a target transit time as well as prioritization of certain calls over others.
+
+\newpage
+
+# Appendix
+
+```{r include=FALSE}
+#| message: false
+#| label: load-packages
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(sf)
+library(tigris)
+options(tigris_use_cache = TRUE)
+library(lme4)
+library(patchwork)
+library(kableExtra)
+```
+
+```{r include=FALSE}
+#| message: false
+#| label: load-data
+emsData <- load("emsData.RData")
+ems <- x
+nc_counties <- counties(state = "NC", cb = TRUE, year = 2022)
+```
+
+```{r tab-1}
+#| echo: false
+
+scenarios_tbl <- data.frame(
+  Scenarios = c("Far North", "Near North", "Central", "South"),
+  S0 = c(0, 0, 3, 1),
+  S1 = c(0, 1, 3, 0),
+  S2 = c(1, 0, 3, 0),
+  S3 = c(0, 1, 2, 1),
+  S4 = c(1, 0, 2, 1)
+)
+```
+
+```{r fig-1}
+#| label: all-calls
+#| echo: false
+
+vance <- nc_counties[nc_counties$NAME == "Vance", ]
+calls_sf <- st_as_sf(x, 
+                     coords = c("REF.GPS.LON", "REF.GPS.LAT"), 
+                     crs = 4326)
+stations <- ems |>
+  distinct(VEHCGPS) |> 
+  separate(VEHCGPS, into = c("LAT", "LON"), sep = ",\\s*", convert = TRUE) |>
+  st_as_sf(coords = c("LON", "LAT"), crs = 4326)
+
+hospitals <- ems |>
+  distinct(REC.LON, REC.LAT, REC.NAME) |>
+  filter(!is.na(REC.LON) & !is.na(REC.LAT)) |>
+  st_as_sf(coords = c("REC.LON", "REC.LAT"), crs = 4326)
+```
+
+```{r}
+#| label: in-vance
+vance <- st_transform(vance, crs = 4326)
+calls_vance <- st_intersection(calls_sf, vance)
+
+stations <- x |>
+  distinct(VEHCGPS) |> 
+  tidyr::separate(VEHCGPS, into = c("LAT", "LON"), sep = ",\\s*", convert = TRUE) |>
+  st_as_sf(coords = c("LON", "LAT"), crs = 4326)
+
+hospitals <- x |>
+  distinct(REC.LON, REC.LAT, REC.NAME) |>
+  filter(!is.na(REC.LON) & !is.na(REC.LAT)) |>
+  st_as_sf(coords = c("REC.LON", "REC.LAT"), crs = 4326)
+
+hospitals_vance <- st_intersection(hospitals, vance)
+
+fig1 <- ggplot() +
+  geom_sf(data = vance, fill = "white", color = "black") +
+  geom_sf(data = calls_vance, aes(color = DISPATCH.PRIORITY.NAME), 
+          size = 1, alpha = 0.5) +
+  geom_sf(data = stations, color = "red", shape = 17, size = 3) +
+  geom_sf(data = hospitals_vance, color = "blue", shape = 15, size = 3) +
+  theme_minimal() +
+  labs(title = "Locations in Vance County, NC",
+       color = "Priority") +
+  theme(legend.position = "right",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1))
+```
+
+```{r fig-2}
+#| label: region-prop-days
+#| echo: false
+
+ems_summary <- ems |>
+  mutate(date = as.Date(DT.DISP)) |>
+  count(date, REF.GRID) |>
+  group_by(date) |>
+  mutate(prop = n / sum(n)) |>
+  ungroup()
+
+ems_stats <- ems_summary |>
+  group_by(date, REF.GRID) |>
+  summarise(
+    mean_prop = mean(prop, na.rm = TRUE),
+    se_prop   = sd(prop, na.rm = TRUE)/sqrt(n()),
+    .groups = "drop"
+  )
+
+mean_props <- ems_stats |>
+  group_by(REF.GRID) |>
+  summarise(mean_prop = mean(mean_prop, na.rm = TRUE), .groups = "drop")
+
+fig2.1 <- ggplot(ems_stats, aes(x = date, y = mean_prop, color = REF.GRID, fill = REF.GRID)) +
+  geom_line(size = 1) +
+  geom_point() +
+  geom_hline(data = mean_props,
+             aes(yintercept = mean_prop, color = REF.GRID), linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "EMS Calls by Region Across Days",
+    x = "Date",
+    y = "Number of Calls",
+    color = "Region",
+    fill = "Region"
+  ) +
+  theme(legend.position = "top")
+```
+
+```{r fig-3}
+#| label: region-prop-time
+#| echo: false
+
+ems_summary <- ems |>
+  mutate(hour = hour(DT.DISP)) |>
+  count(hour, REF.GRID) |>
+  group_by(hour) |>
+  mutate(prop = n / sum(n)) |>
+  ungroup()
+
+ems_stats <- ems_summary |>
+  group_by(hour, REF.GRID) |>
+  summarise(
+    mean_prop = mean(prop, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+vlines <- c(7, 10, 15, 18)
+
+fig2.2 <- ggplot(ems_stats, aes(x = hour, y = mean_prop, color = REF.GRID, group = REF.GRID)) +
+  geom_line(size = 1) +
+  geom_point() +
+  geom_vline(xintercept = vlines, linetype = "dashed", color = "gray50") +
+  scale_x_continuous(breaks = seq(0, 23, by = 2)) +
+  theme_minimal() +
+  labs(
+    title = "EMS Calls by Region Across Hours",
+    x = "Hour of Day",
+    y = "Number of Calls",
+    color = "Region"
+  ) +
+  theme(legend.position = "top")
+```
+
+```{r}
+ems <- ems |>
+  mutate(
+    DT.DISP = ymd_hms(DT.DISP),
+    DT.AVAILABLE = ymd_hms(DT.AVAILABLE)
+  ) |>
+  arrange(DT.DISP)
+
+dis.time   <- ems$DT.DISP
+avail.time <- ems$DT.AVAILABLE
+busy_matrix <- outer(dis.time, avail.time, FUN = "<=")
+
+busy_matrix[upper.tri(busy_matrix, diag = TRUE)] <- FALSE
+
+ems$unavailable_count <- rowSums(busy_matrix)
+
+ems <- ems |>
+  mutate(unavailable_count = pmin(unavailable_count, 4L))  # treat 5s as 4s
+
+fig3 <- ems |>
+  count(unavailable_count, name = "n") |>
+  mutate(prop = n / sum(n)) |>
+  ggplot(aes(x = factor(unavailable_count), y = prop)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 0.1)),
+            vjust = -0.3) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Proportion of Calls with X Ambulances Already Busy",
+    x = "Number of ambulances already busy",
+    y = "Proportion of calls"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+gps.centN <- unique(x$VEHCGPS[x$BASE.NAME=="Company 9"])
+lat.centN <- as.numeric(strsplit(gps.centN, ",")[[1]][1])
+lat.northNN <- 36.430596
+north_cut <- lat.centN
+# north_cut <- (lat.centN + lat.northNN) / 2
+
+ems_no_na_observedtt <- ems |>
+  mutate(
+    observedTT_secs = as.numeric(observedTT, units = "secs")
+  ) |>
+  filter(!is.na(observedTT_secs), observedTT_secs >= 0) |>
+  mutate(region = if_else(REF.GPS.LAT > north_cut, "North", "Other"))
+
+medians <- ems_no_na_observedtt |>
+  group_by(region) |>
+  summarize(median_val = median(observedTT_secs, na.rm = TRUE))
+
+stats <- ems_no_na_observedtt |>
+  group_by(region) |>
+  summarise(
+    n_calls = n(),
+    median_val = median(observedTT_secs, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(region_label = paste0(region, " (n = ", n_calls, ")"))
+```
+
+```{r}
+fig4 <- ggplot(ems_no_na_observedtt |>
+         left_join(stats |> select(region, region_label), by = "region"),
+       aes(x = region_label, y = observedTT_secs)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4, color = "black") +
+  geom_jitter(width = 0.15, alpha = 0.25, color = "steelblue") +
+  geom_text(
+    data = stats,
+    aes(x = region_label, y = median_val, label = round(median_val, 0)),
+    vjust = -0.4, fontface = "bold", color = "red",
+    inherit.aes = FALSE
+  ) +
+  labs(
+    title = "Observed Response Times by Region",
+    subtitle = "North defined as above central station",
+    x = NULL,
+    y = "Observed time to arrive (seconds)"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+```{r}
+
+x2 <- x |>
+  mutate(eTT.BG.real = ifelse(BASE.NAME == "Company 9", eTT.BG.Ce, eTT.BG.So),
+         eTT.Pe.real = ifelse(BASE.NAME == "Company 9", eTT.Pe.Ce, eTT.Pe.So),
+         eTT.Op.real = ifelse(BASE.NAME == "Company 9", eTT.Op.Ce, eTT.Op.So),
+         eTT.UA.real = ifelse(BASE.NAME == "Company 9", eTT.UA.Ce, eTT.UA.So),
+         time_sec = as.numeric(observedTT))
+
+
+x2 <- x2 |>
+  mutate(closest = case_when(
+    eTT.BG.So < eTT.BG.Ce & eTT.BG.So < eTT.BG.NN & eTT.BG.So < eTT.BG.FN ~ "So",
+    eTT.BG.Ce < eTT.BG.So & eTT.BG.Ce < eTT.BG.NN & eTT.BG.Ce < eTT.BG.FN ~ "Ce",
+    eTT.BG.NN < eTT.BG.So & eTT.BG.NN < eTT.BG.Ce & eTT.BG.NN < eTT.BG.FN ~ "NN",
+    eTT.BG.FN < eTT.BG.So & eTT.BG.FN < eTT.BG.Ce & eTT.BG.FN < eTT.BG.NN ~ "FN",
+  )) |>
+  mutate(yhat.closest = case_when(
+    closest == "So" ~ eTT.BG.So,
+    closest == "Ce" ~ eTT.BG.Ce,
+    closest == "NN" ~ eTT.BG.NN,
+    closest == "FN" ~ eTT.BG.FN
+  ))
+
+fig5 <- x2 |>
+  group_by(closest) |>
+  summarize(n = n()) |>
+  ungroup() |>
+  mutate(pct = n / sum(n)) |>
+  ggplot(aes(x = closest, y = pct)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = scales::percent(pct, accuracy = 0.1)),
+            vjust = -0.3) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Proportion of Calls Closest to Each Station",
+    subtitle = "Predicted travel time based on Best Guess traffic model",
+    x = "Station",
+    y = "Proportion of calls"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+tt_cols_for_model <- function(model) {
+  paste0("eTT.", model, ".")
+}
+
+stations <- c("So", "Ce", "NN", "FN")
+
+scenarios <- list(
+  S0 = c(So = 1, Ce = 3, NN = 0, FN = 0),
+  S1 = c(So = 0, Ce = 3, NN = 1, FN = 0),
+  S2 = c(So = 0, Ce = 3, NN = 0, FN = 1),
+  S3 = c(So = 1, Ce = 2, NN = 1, FN = 0),
+  S4 = c(So = 1, Ce = 2, NN = 0, FN = 1)
+)
+
+traffic_models <- c("UA", "BG", "Pe", "Op")
+
+ems <- calls_vance |>
+  mutate(DT.DISP = ymd_hms(DT.DISP, quiet = TRUE)) |>
+  arrange(DT.DISP) |>
+  mutate(call_id = row_number()) |> # call ids
+  filter(!is.na(DT.ARRIVE)) |>
+  distinct() |>
+  select(
+    -c(
+    STATEFP, COUNTYFP, COUNTYNS, AFFGEOID, GEOID, NAME, NAMELSAD,
+    STUSPS, STATE_NAME, LSAD, ALAND, AWATER,
+    VEHCGPS, DT.LVREF, DT.ARVREC,
+    REC.NAME, REC.LON, REC.LAT,
+    timeToEnroute, onSceneDur, toHospitalTT, atHospitalDur, geometry)
+  )
+
+required_cols <- unlist(lapply(traffic_models, function(m) paste0("eTT.", m, ".", stations)))
+missing_cols  <- setdiff(required_cols, names(ems))
+if (length(missing_cols)) {
+  stop("Missing expected travel-time columns: ", paste(missing_cols, collapse = ", "))
+}
+
+ems <- ems |>
+  mutate(arriveToClear_secs = suppressWarnings(as.numeric(arriveToClearTime, units = "secs"))) |>
+  mutate(arriveToClear_secs = ifelse(is.na(arriveToClear_secs), 0, arriveToClear_secs))
+
+simulate_scenarios <- function(ems_df, scenarios, traffic_models) {
+  out_list <- list()
+
+  for (sc_name in names(scenarios)) {
+    counts <- scenarios[[sc_name]]
+    roster <- do.call(
+      rbind,
+      lapply(names(counts), function(st) {
+        if (counts[[st]] <= 0) return(NULL)
+        data.frame(
+          amb_id   = paste0(st, "-", seq_len(counts[[st]])),
+          station  = st,
+          available_at = as.POSIXct(rep(-Inf, counts[[st]]), origin = "1970-01-01", tz = "UTC"),
+          stringsAsFactors = FALSE
+        )
+      })
+    )
+    rownames(roster) <- NULL
+
+    for (model in traffic_models) {
+      amb_state <- roster
+
+      col_stem <- tt_cols_for_model(model)
+
+      model_cols <- setNames(paste0(col_stem, stations), stations)
+
+      acc <- vector("list", nrow(ems_df))
+
+      for (i in seq_len(nrow(ems_df))) {
+        call <- ems_df[i, ]
+        dispatch_time <- call$DT.DISP
+        atc_secs      <- call$arriveToClear_secs
+        active_stations <- names(counts)[counts > 0]
+
+        tt_vec <- sapply(active_stations, function(st) {
+          call[[model_cols[[st]]]]
+        })
+
+        free_idx <- which(amb_state$available_at <= dispatch_time)
+
+        chosen_idx <- NA_integer_
+        chosen_station <- NA_character_
+        chosen_tt <- NA_real_
+        effective_dispatch <- dispatch_time
+
+        if (length(free_idx)) {
+          free_units <- amb_state[free_idx, , drop = FALSE]
+          free_units$tt <- tt_vec[free_units$station]
+          ord <- order(free_units$tt, free_units$available_at, free_units$amb_id)
+          pick <- free_units[ord[1], , drop = FALSE]
+          chosen_station <- pick$station
+          chosen_tt      <- as.numeric(pick$tt)
+          chosen_idx     <- free_idx[ord[1]]
+          effective_dispatch <- dispatch_time
+        } else {
+          soonest_idx <- which.min(amb_state$available_at)
+          chosen_idx  <- soonest_idx
+          chosen_station <- amb_state$station[soonest_idx]
+          chosen_tt      <- as.numeric(tt_vec[chosen_station])
+          effective_dispatch <- amb_state$available_at[soonest_idx]
+        }
+
+        eta_time <- effective_dispatch + chosen_tt
+
+        new_available_time <- effective_dispatch + chosen_tt + atc_secs
+        amb_state$available_at[chosen_idx] <- new_available_time
+
+        acc[[i]] <- cbind(
+          call,
+          data.frame(
+            scenario        = sc_name,
+            traffic_model   = model,
+            ambulance_id    = amb_state$amb_id[chosen_idx],
+            station         = chosen_station,
+            estimated_tt_s  = chosen_tt,
+            effective_dispatch_time = effective_dispatch,
+            est_arrive_scene_time   = eta_time,
+            busy_until_time         = new_available_time,
+            stringsAsFactors = FALSE
+          )
+        )
+      }
+
+      out_list[[paste0(sc_name, "_", model)]] <- dplyr::bind_rows(acc)
+    }
+  }
+
+  dplyr::bind_rows(out_list)
+}
+
+new_data <- simulate_scenarios(ems, scenarios, traffic_models)
+
+```
+
+```{r}
+overlaps <- new_data |>
+  arrange(scenario, traffic_model, ambulance_id, effective_dispatch_time) |>
+  group_by(scenario, traffic_model, ambulance_id) |>
+  mutate(
+    prev_busy_until = lag(busy_until_time),
+    overlap = effective_dispatch_time < prev_busy_until
+  ) |>
+  filter(!is.na(overlap) & overlap)
+
+timing_issues <- new_data |>
+  filter(
+    est_arrive_scene_time < effective_dispatch_time |
+    busy_until_time < est_arrive_scene_time
+  ) |>
+  mutate(
+    problem = case_when(
+      est_arrive_scene_time < effective_dispatch_time ~ "arrival_before_dispatch",
+      busy_until_time < est_arrive_scene_time ~ "busy_before_arrival",
+      TRUE ~ "unknown"
+    ))
+```
+
+```{r}
+
+vance <- nc_counties |>
+  filter(NAME == "Vance") |>
+  st_transform(crs = 4326)
+
+bg_calls <- new_data |>
+  filter(traffic_model == "BG") |>
+  mutate(
+    scenario     = factor(scenario, levels = c("S0","S1","S2","S3","S4")),
+    station_code = sub("-.*$", "", ambulance_id),      # "Ce","So","NN","FN"
+    ambulance_id = factor(ambulance_id)
+  )
+
+bg_calls_sf <- st_as_sf(
+  bg_calls,
+  coords = c("REF.GPS.LON", "REF.GPS.LAT"),
+  crs = 4326,
+  remove = FALSE
+)
+
+ramp_for <- function(station_code) {
+  switch(station_code,
+    "Ce" = colorRampPalette(c("#ff777d", "#c22c32", "#760000")),
+    "So" = colorRampPalette(c("#6ac5fe")),
+    "NN" = colorRampPalette(c("#006d2c")),
+    "FN" = colorRampPalette(c("#90EE91")),
+  )
+}
+
+amb_ids <- bg_calls_sf |>
+  st_drop_geometry() |>
+  distinct(station_code, ambulance_id) |>
+  arrange(factor(station_code, levels = c("Ce","So","NN","FN")),
+          as.integer(str_extract(as.character(ambulance_id), "(?<=-)[0-9]+")))
+amb_ids <- split(amb_ids, amb_ids$station_code)
+
+pal_map <- list()
+for (st in names(amb_ids)) {
+  ids <- amb_ids[[st]]$ambulance_id
+  n   <- length(ids)
+  if (n > 0) {
+    shades <- ramp_for(st)(max(n, 3))[seq_len(n)]
+    pal_map[as.character(ids)] <- shades
+  }
+}
+pal_vec <- unlist(pal_map)
+
+# --- 3) Plot
+fig6 <- ggplot() +
+  geom_sf(data = vance, fill = "white", color = "black") +
+  geom_sf(
+    data = bg_calls_sf,
+    aes(color = ambulance_id),
+    size = 1.6, alpha = 0.8
+  ) +
+  facet_wrap(~ scenario, nrow = 1) +
+  scale_color_manual(
+    name   = "Ambulance (by station)",
+    values = pal_vec,
+    guide  = guide_legend(override.aes = list(alpha = 1, size = 3))
+  ) +
+  coord_sf(expand = FALSE) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    strip.text      = element_text(face = "bold"),
+    # remove axes & ticks
+    axis.title      = element_blank(),
+    axis.text       = element_blank(),
+    axis.ticks      = element_blank(),
+    panel.grid      = element_blank()
+  ) +
+  labs(
+    title    = "Dispatched Ambulance by Call Location (Best Guess)"
+  )
+```
+
+```{r}
+s0_data <- new_data |>
+  filter(scenario == "S0") |>
+  mutate(observedTT_secs = as.numeric(observedTT, units = "secs"))
+```
+
+```{r}
+# that one outlier was call 244...
+
+outlier_call <- ems |>
+  filter(call_id == 244)
+
+outlier_sf <- st_as_sf(outlier_call, 
+                       coords = c("REF.GPS.LON", "REF.GPS.LAT"), 
+                       crs = 4326)
+```
+
+```{r}
+split_by_traffic <- split(as.data.frame(new_data), new_data$traffic_model)
+for (tr in names(split_by_traffic)) {
+  current <- split_by_traffic[[tr]]
+  for (st in c("So", "Ce", "NN", "FN")) {
+    current[[paste("eTT", st, sep = ".")]] = current[[paste("eTT", tr, st, sep = ".")]]
+  }
+  times <- current %>% select(eTT.So, eTT.Ce, eTT.NN, eTT.FN)
+  min_times <- apply(times, 1, min)
+  m <- matrix(rep(min_times, 4), ncol = 4) |> as.data.frame()
+  best = (times == m)
+  current$best <- ""
+  for (st in c("So", "Ce", "NN", "FN")) {
+    b <- best[,paste("eTT", st, sep = ".")]
+    current$best[b] <- st
+  }
+  split_by_traffic[[tr]] <- current
+}
+
+optimal_station_rates <- do.call(rbind, split_by_traffic) |>
+  as.data.frame() |>
+  group_by(scenario, traffic_model) |>
+  summarize(pct_optimal = mean(best == station)) |>
+  ungroup()
+```
+
+```{r}
+baseline <- new_data |>
+  as.data.frame() |>
+  filter(scenario == "S0") |>
+  select(call_id, scenario, traffic_model, estimated_tt_s)
+
+with_baseline <- new_data |>
+  as.data.frame() |>
+  left_join(baseline, by = c("call_id", "traffic_model"), suffix = c("", ".S0"))
+
+sim_data <- with_baseline |>
+  filter(estimated_tt_s != estimated_tt_s.S0 | scenario == "S0") |>
+  group_by(call_id, traffic_model) |>
+  filter(n() > 1) |>
+  ungroup() |>
+  select(call_id, scenario, traffic_model, estimated_tt_s) |>
+  mutate(call_id = factor(call_id))
+
+prob_diff <- with_baseline |>
+  filter(scenario != "S0") |>
+  group_by(scenario, traffic_model) |>
+  summarize(pr_diff = mean(estimated_tt_s != estimated_tt_s.S0))
+```
+
+```{r}
+sim_data <- new_data |>
+  select(call_id, scenario, traffic_model, estimated_tt_s) |>
+  group_by(call_id, traffic_model) |>
+  filter(max(estimated_tt_s) != min(estimated_tt_s)) |>
+  ungroup() |>
+  mutate(call_id = factor(call_id))
+
+results <- list()
+
+for(model in unique(sim_data$traffic_model)) {
+  mod_data <- sim_data |>
+    filter(traffic_model == model)
+  
+  fit <- lmer(estimated_tt_s ~ scenario + (1 | call_id), data = mod_data)
+  
+  results[[model]] <- fit
+}
+
+```
+
+```{r}
+fit_bg <- results[["BG"]]
+mod_diag <- data.frame(
+  fitted = fitted(fit_bg),
+  resid  = resid(fit_bg),
+  scenario = fit_bg@frame$scenario
+)
+
+fig7.1 <- ggplot(mod_diag, aes(x = fitted, y = resid, color = scenario)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Residuals vs Fitted Values",
+    x = "Fitted values",
+    y = "Residuals"
+  ) +
+  theme(legend.position = "top")
+
+fig7.2 <- ggplot(mod_diag, aes(x = scenario, y = resid, fill = scenario)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.1, alpha = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Residuals vs Scenario",
+    x = "Scenario",
+    y = "Residuals"
+  ) +
+  theme(legend.position = "top")
+
+fig7.3 <- ggplot(mod_diag, aes(sample = resid)) +
+  stat_qq(alpha = 0.6) +
+  stat_qq_line(color = "red") +
+  theme_minimal() +
+  labs(
+    title = "Normal Q-Q Plot of Residuals"
+  )
+```
+
+```{r}
+bg_data <- sim_data |> 
+  filter(traffic_model == "BG")
+```
+
+```{r}
+diff_map <- bg_data |>
+  select(call_id, scenario, geometry, estimated_tt_s) |>
+  pivot_wider(names_from = scenario, values_from = estimated_tt_s) |>
+  mutate(
+    dS1 = S1 - S0,
+    dS2 = S2 - S0,
+    dS3 = S3 - S0,
+    dS4 = S4 - S0
+  ) |>
+  pivot_longer(starts_with("dS"), names_to = "scenario_diff", values_to = "delta_tt")
+
+# Plot
+fig8 <- ggplot() +
+  geom_sf(data = vance, fill = "gray90", color = "gray70") +
+  geom_sf(data = diff_map, aes(color = delta_tt), size = 2, alpha = 0.8) +
+  scale_color_gradient2(
+    low = "blue", mid = "white", high = "red", midpoint = 0,
+    name = "Δ Travel Time (sec)"
+  ) +
+  facet_wrap(~ scenario_diff, ncol = 4) +
+  theme_minimal() +
+  labs(
+    title = "Change in Travel Time vs Baseline (S0)",
+    subtitle = "Blue = faster than baseline, Red = slower"
+  ) +
+  theme(
+    legend.position = "bottom",  # <- move legend below plot
+    legend.key.width = unit(2, "cm"),
+    legend.key.height = unit(0.4, "cm"),
+    strip.text = element_text(size = 11, face = "bold"),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1)
+  )
+```
+
+```{r}
+# Final choice: raw 
+tbl2 <- summary(results$BG)$coefficients
+rownames(tbl2) <- gsub("scenarioS", "Scenario ", rownames(tbl))
+```
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+#| fig-cap: "All EMS call locations within Vance County. The red triangles represent the two existing stations while the blue square is the hospital. There does not seem to be any significant relationship between dispatch priority and call location."
+fig1
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "The figure on the left shows calls by date across the three regions. Dotted lines represent the average proportion of calls. The figure on the right shows calls by time of day across the three regions. Dotted lines highlight typical peak traffic hours of 7-10am and 3-6pm. There does not seem to be any clear relationship between date and time."
+fig2.1 + fig2.2
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+#| fig-cap: "This plot shows the proportion of calls for which different numbers of ambulances are busy. In over half of cases, all ambulances are avaliable. Only less than 2% of time are all ambulances busy."
+fig3
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+#| fig-cap: "Box plot of response times for northern calls compared to central and southern calls. Northern calls are those for which the lattitude is great than that of the central station. Red text highlights the median travel time stratified by call location."
+fig4
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+#| fig-cap: "Results of simulation of closest stations, disregarding ambulance avaliability. In less than 7% of cases the northern statioins are the closest. Nearly three quarters of all calls occur in the central region and a fifth of calls occurs in the south."
+fig5
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+#| fig-cap: "Ambulances dispatched by scenario according to dispatch rule of nearest avaliable ambulance. Notice that many of the central calls experience no change."
+fig6
+```
+
+```{r}
+#| fig-width: 9
+#| fig-height: 8
+#| fig-cap: "Model Diagnostics"
+(fig7.1 + fig7.2) / fig7.3
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+#| fig-cap: "Map of relative changes with respect to the baseline in response times under each of the proposed scenarios. Each point represents a call. Red points represent an increase in estimates, blue points represent a decrease in estimate, and white points represent no change."
+fig8
+```
+
+\newpage
+
+```{r}
+kable(scenarios_tbl, caption = "Ambulance Allocation Scenarios") |>
+  kable_styling(full_width = FALSE, position = "center")
+```
+
+```{r}
+kable(tbl2, digits = 2, caption = "Model Results (Best Guess traffic algorithm)")
+```
